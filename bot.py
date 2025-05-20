@@ -13,9 +13,14 @@ bot = telebot.TeleBot(TOKEN)
 openai.api_key = OPENAI_TOKEN
 app = Flask(__name__)
 
-# Установка webhook при старте
+print(f"Telegram token: {'OK' if TOKEN else 'NOT SET'}")
+print(f"Webhook URL: {WEBHOOK_URL}")
+print(f"OpenAI token: {'OK' if OPENAI_TOKEN else 'NOT SET'}")
+
 bot.remove_webhook()
-bot.set_webhook(url=WEBHOOK_URL)
+time.sleep(1)
+result = bot.set_webhook(url=WEBHOOK_URL)
+print(f"Webhook установлен: {result}")
 
 # Вспомогательная функция для проверки, упомянуто ли имя бота
 def is_mention_leha(message):
