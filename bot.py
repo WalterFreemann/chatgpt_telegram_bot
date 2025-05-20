@@ -67,6 +67,10 @@ def handle_message(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"Что-то пошло не так, братишка... {str(e)}")
 
+@app.route('/', methods=['GET'])
+def index():
+    return 'Бот жив и ждёт POST-запросов от Telegram 🤖', 200
+
 # Запуск Flask-приложения
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
