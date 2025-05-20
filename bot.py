@@ -1,9 +1,10 @@
 import os
+import time
 import telebot
 from flask import Flask, request
 import openai
 
-# Инициализация переменных из environment
+# Инициализация токенов
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 OPENAI_TOKEN = os.getenv("OPENAI_API_KEY")
@@ -12,10 +13,11 @@ bot = telebot.TeleBot(TOKEN)
 openai.api_key = OPENAI_TOKEN
 app = Flask(__name__)
 
-# Установка webhook (удаляем старый и ставим новый)
+# Установка webhook
 bot.remove_webhook()
 bot.set_webhook(url=WEBHOOK_URL)
 
+# Webhook обработка
 @app.route('/', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -26,41 +28,45 @@ def webhook():
     else:
         return 'Invalid request', 403
 
-# Команда /start — приветствие
+# Команды
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Привет! Я бот Леха. Чтобы я ответил, упомяни моё имя — 'Леха'.")
+def start_command(message):
+    bot.send_message(message.chat.id, "Зови меня просто — Лёха. Спро́сишь — отвечу, если не тупой вопрос :)")
 
-# Команда /help — помощь
 @bot.message_handler(commands=['help'])
-def send_help(message):
-    help_text = (
-        "Я бот Леха — общаюсь через ChatGPT.\n"
-        "Чтобы получить ответ, напиши сообщение с именем 'Леха'.\n"
-        "Пример: 'Леха, расскажи анекдот.'\n"
-        "Команды:\n"
-        "/start — приветствие\n"
-        "/help — эта помощь"
-    )
-    bot.reply_to(message, help_text)
+def help_command(message):
+    bot.send_message(message.chat.id, "Просто пиши сообщение с моим именем — 'Лёха', и я отвечу. Есть ещё команды: /start, /help, /reset")
 
-# Обработка сообщений, в которых есть слово "леха"
-@bot.message_handler(func=lambda message: 'леха' in message.text.lower())
+@bot.message_handler(commands=['reset'])
+def reset_command(message):
+    bot.send_message(message.chat.id, "Чистить пока нечего, я ж без памяти как рыбка 🐟")
+
+# Главный хендлер
+@bot.message_handler(func=lambda message: True)
 def handle_message(message):
+    if 'лёха' not in message.text.lower():
+        return
+
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-nano",
             messages=[
+                {"role": "system", "content": "Ты — Лёха. Умный, дерзкий ироничный собеседник, говоришь просто, по-уличному, но не грубишь без причины."},
                 {"role": "user", "content": message.text}
             ]
         )
         reply = response.choices[0].message['content']
-        bot.send_message(message.chat.id, reply)
+
+        # Отправка с паузами если текст слишком длинный
+        max_length = 4096
+        parts = [reply[i:i+max_length] for i in range(0, len(reply), max_length)]
+        for part in parts:
+            bot.send_message(message.chat.id, part)
+            time.sleep(1.5)  # пауза между частями
+
     except Exception as e:
-        bot.send_message(message.chat.id, "Извини, что-то пошло не так. Попробуй позже.")
-        print(f"Error: {e}")
+        bot.send_message(message.chat.id, f"Что-то пошло не так, братишка... {str(e)}")
 
-# Все остальные сообщения игнорируем (можешь добавить, если надо)
-
+# Запуск Flask-приложения
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
