@@ -1,52 +1,47 @@
 import os
+from flask import Flask, request
+import telebot
 import openai
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message
-from aiogram.utils.executor import start_webhook
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+API_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-WEBHOOK_PATH = f"/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например, https://chatgpt-telegram-bot.onrender.com
 
+bot = telebot.TeleBot(API_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
+app = Flask(__name__)
 
-@dp.message_handler()
-async def gpt_reply(message: Message):
+# Устанавливаем webhook
+@app.before_first_request
+def set_webhook():
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+
+@app.route('/', methods=['POST'])
+def webhook():
+    json_string = request.get_data().decode('utf-8')
+    update = telebot.types.Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return '', 200
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.chat.id, "Привет! Отправь мне любой текст, и я отвечу с помощью ChatGPT.")
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Ты дружелюбный Telegram-бот, созданный помочь пользователю."},
-                {"role": "user", "content": message.text}
-            ]
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=message.text,
+            max_tokens=150,
+            temperature=0.7,
         )
-        reply = response['choices'][0]['message']['content']
-        await message.reply(reply)
+        answer = response.choices[0].text.strip()
+        bot.send_message(message.chat.id, answer)
     except Exception as e:
-        await message.reply("Произошла ошибка. Попробуй позже.")
-        print(f"OpenAI error: {e}")
+        bot.send_message(message.chat.id, "Ошибка при обращении к OpenAI API.")
 
-async def on_startup(dp):
-    await bot.set_webhook(WEBHOOK_URL)
-
-async def on_shutdown(dp):
-    await bot.delete_webhook()
-
-if __name__ == "__main__":
-    from aiogram import executor
-    start_webhook(
-        dispatcher=dp,
-        webhook_path=WEBHOOK_PATH,
-        on_startup=on_startup,
-        on_shutdown=on_shutdown,
-        skip_updates=True,
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-    )
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
