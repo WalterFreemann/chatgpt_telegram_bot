@@ -98,26 +98,23 @@ def handle_message(message):
 
 # === Webhook endpoint ===
 @app.route(WEBHOOK_PATH, methods=["POST"])
+```python
+# Webhook endpoint: всегда возвращает 200, даже если ошибка в обработке
+@app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
     try:
         json_str = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_str)
-        bot.process_new_updates([update])
+        # Обработка обновления; если внутри сломается, мы всё равно вернём 200
+        try:
+            bot.process_new_updates([update])
+        except Exception as handler_exc:
+            logger.error(f"Handler error: {handler_exc}")
         return '', 200
     except Exception as e:
         logger.error(f"Webhook handling error: {e}")
-        return 'Error', 500
+        return '', 200  # вернули 200, чтобы Telegram не отключал вебхук
 
-# === Настройка вебхука и запуск отчётов ===
-def setup():
-    bot.remove_webhook()
-    time.sleep(1)
-    logger.info(f"Attempting to set webhook: {WEBHOOK_URL}")
-    bot.set_webhook(url=WEBHOOK_URL)
-    threading.Thread(target=daily_report_loop, daemon=True).start()
-    logger.info("Daily report thread started.")
-
-# === Запуск приложения ===
-if __name__ == '__main__':
-    setup()
+# Настройка вебхука и запуск отчётов
+```
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
