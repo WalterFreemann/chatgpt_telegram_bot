@@ -11,7 +11,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_HOST = 'https://chatgpt-telegram-bot-662g.onrender.com'  # ЗАМЕНИ на имя твоего проекта
 WEBHOOK_PATH = f"/{BOT_TOKEN}"
 WEBHOOK_URL = WEBHOOK_HOST + WEBHOOK_PATH
-OWNER_ID = 258535298
+OWNER_ID = int(os.getenv("OWNER_ID"))
 
 bot = telebot.TeleBot(BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
