@@ -11,7 +11,7 @@ from flask import Flask, request
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram token
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # OpenAI API key
 OWNER_ID = int(os.getenv("OWNER_ID"))  # Ваш Telegram ID для отчётов
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://your-app-name.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://your-app-name.onrender.com (без слэша в конце)
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -25,17 +25,16 @@ bot = telebot.TeleBot(BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
 # === ПОДРОБНЫЙ SYSTEM_PROMPT для Лёхи ===
-# Здесь можно добавлять пункты: формат ответа, тон, запреты, дополнительные примеры.
 LEHA_PROMPT = (
     "Ты — Лёха, 40-летний образованный мужик с чёрным юмором и ценным опытом.\n"
     "Циничный, но не злой. Не льстишь, не сюсюкаешь. Говоришь прямо и без обмана.\n"
     "Отвечаешь, когда тебя зовут по имени Лёха или отвечают на твоё сообщение.\n"
-    "Дополнительные правила (добавь сюда после этой строки):\n"
+    "Дополнительные правила:\n"
     "1. Краткий вывод в 1–2 предложениях в начале.\n"
     "2. Не более одного мата за ответ.\n"
-    "3. Если вопрос не по теме — перевод беседы аккуратно.\n"
-    "4. Без упоминания ИИ, без канцелярита.\n"
-    "5. Всегда завершать практическим советом, если уместно."
+    "3. Если вопрос не по теме — аккуратно переведи беседу.\n"
+    "4. Без упоминания ИИ и канцелярита.\n"
+    "5. Заверши практическим советом, если уместно."
 )
 
 # === Функции токен-отчёта ===
@@ -48,8 +47,10 @@ def get_token_usage():
     if now - USAGE_CACHE["last_check"] < 300:
         return USAGE_CACHE["usage"]
     try:
-        params = {"start_date": time.strftime("%Y-%m-%d", time.gmtime(now - 86400)),
-                  "end_date": time.strftime("%Y-%m-%d", time.gmtime(now))}
+        params = {
+            "start_date": time.strftime("%Y-%m-%d", time.gmtime(now - 86400)),
+            "end_date": time.strftime("%Y-%m-%d", time.gmtime(now))
+        }
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
         res = requests.get("https://api.openai.com/v1/dashboard/billing/usage", headers=headers, params=params)
         data = res.json()
@@ -98,18 +99,25 @@ def handle_message(message):
 # === Webhook endpoint ===
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
-    update = telebot.types.Update.de_json(request.get_data().decode(), request)
-    bot.process_new_updates([update])
-    return '', 200
+    try:
+        json_str = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_str)
+        bot.process_new_updates([update])
+        return '', 200
+    except Exception as e:
+        logger.error(f"Webhook handling error: {e}")
+        return 'Error', 500
 
-# === Настройка вебхука и запуск===
+# === Настройка вебхука и запуск отчётов ===
 def setup():
     bot.remove_webhook()
     time.sleep(1)
+    logger.info(f"Attempting to set webhook: {WEBHOOK_URL}")
     bot.set_webhook(url=WEBHOOK_URL)
     threading.Thread(target=daily_report_loop, daemon=True).start()
-    logger.info(f"Webhook set: {WEBHOOK_URL}")
+    logger.info("Daily report thread started.")
 
+# === Запуск приложения ===
 if __name__ == '__main__':
     setup()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
