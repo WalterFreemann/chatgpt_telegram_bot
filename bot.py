@@ -1,77 +1,91 @@
 import os
-import time
-import datetime
 import telebot
 import openai
+import time
+import threading
 from flask import Flask, request
 
-# === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-ADMIN_CHAT_ID = 258535298
-DAILY_TOKEN_LIMIT = 250_000
-ALERT_THRESHOLD = int(DAILY_TOKEN_LIMIT * 0.9)
+# Переменные окружения
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+WEBHOOK_HOST = 'https://chatgpt-telegram-bot-662g.onrender.com'  # ЗАМЕНИ на имя твоего проекта
+WEBHOOK_PATH = f"/{BOT_TOKEN}"
+WEBHOOK_URL = WEBHOOK_HOST + WEBHOOK_PATH
+OWNER_ID = 258535298
 
 bot = telebot.TeleBot(BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
-
 app = Flask(__name__)
-last_report_date = None
 
-def check_token_usage():
-    global last_report_date
-    try:
-        usage = openai.APIUsage.retrieve()
-        total = usage['daily_token_usage']['total_tokens']
+# 🔥 Инструкции для модели
+LEHA_PROMPT = (
+    "Ты — Лёха, 40-летний, образованный, уставший от жизни мужик с чёрным юмором и мозгами.\n"
+    "Циничный, но не злой. Не льстишь, не сюсюкаешь. Всё говоришь как есть, не фильтруешь.\n"
+    "Если надо — угораешь, если не надо — помогаешь. Отвечаешь только если тебя зовут по имени Лёха или отвечают на твоё сообщение.\n"
+    "Избегаешь сюсюканья, канцелярита и приукрашиваний. Не тупишь. Говоришь просто, по делу, но с характером.\n"
+)
 
-        # Тревога при приближении к лимиту
-        if total > ALERT_THRESHOLD:
-            bot.send_message(ADMIN_CHAT_ID, f"⚠️ Почти исчерпан лимит: {total:,} из {DAILY_TOKEN_LIMIT:,} токенов.")
-
-        # Отчёт раз в сутки
-        today = datetime.date.today()
-        if last_report_date != today:
-            last_report_date = today
-            bot.send_message(
-                ADMIN_CHAT_ID,
-                f"📊 Ежедневный отчёт:\nПотрачено токенов: {total:,} из {DAILY_TOKEN_LIMIT:,}"
-            )
-    except Exception as e:
-        print(f"[ERROR] Не удалось получить usage: {e}")
-
+# 💬 Ответы на сообщения
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
+    if not should_respond(message):
+        return
+
+    bot.send_chat_action(message.chat.id, 'typing')
+    user_input = message.text.strip()
+
     try:
-        # Бот отвечает, только если его зовут по имени или на его сообщение отвечают
-        if (message.text and 'лёха' in message.text.lower()) or message.reply_to_message and message.reply_to_message.from_user.username == bot.get_me().username:
-            bot.send_chat_action(message.chat.id, 'typing')
-
-            # Простая заглушка-ответ
-            response = openai.ChatCompletion.create(
-                model="gpt-4o-mini-2024-07-18",
-                messages=[
-                    {"role": "system", "content": "Ты умный, саркастичный мужик по имени Лёха. Отвечай по делу, с юмором, но не как пацан, а как взрослый мужик с опытом."},
-                    {"role": "user", "content": message.text},
-                ]
-            )
-            bot.send_message(message.chat.id, response.choices[0].message.content)
-
-        # Проверка и отчёт по токенам
-        check_token_usage()
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": LEHA_PROMPT},
+                {"role": "user", "content": user_input}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        reply_text = response.choices[0].message["content"].strip()
+        bot.reply_to(message, reply_text)
 
     except Exception as e:
-        print(f"[ERROR] Ошибка в handle_message: {e}")
+        bot.reply_to(message, f"Что-то пошло по пизде: {e}")
 
-@app.route('/' + BOT_TOKEN, methods=['POST'])
+# 📌 Когда отвечать
+def should_respond(message):
+    if message.text is None:
+        return False
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        return True
+    if "лёха" in message.text.lower():
+        return True
+    return False
+
+# 🧠 Токен-отчёт раз в сутки
+def daily_token_report():
+    while True:
+        try:
+            usage = openai.api_usage()
+            total_used = usage["daily"]["usage"][-1]["n_tokens_total"]
+            bot.send_message(OWNER_ID, f"📊 Лёхин отчёт: потрачено {total_used:,} токенов за сегодня.")
+            if total_used >= 240_000:
+                bot.send_message(OWNER_ID, f"🚨 Осторожно! Почти сожрали лимит в 250,000 токенов.")
+        except Exception as e:
+            bot.send_message(OWNER_ID, f"❌ Ошибка при получении отчёта: {e}")
+        time.sleep(86400)
+
+# 🛰 Устанавливаем webhook
+@app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
     bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return 'ok', 200
+    return '', 200
 
-@app.route('/')
-def index():
-    return 'Бот работает'
-
-if __name__ == '__main__':
+@app.before_first_request
+def setup():
     bot.remove_webhook()
     time.sleep(1)
-    bot.set_webhook(url=f"https://chatgpt-telegram-bot-662g.onrender.com/{BOT_TOKEN}")
+    bot.set_webhook(url=WEBHOOK_URL)
+
+# 🚀 Запуск
+if __name__ == '__main__':
+    threading.Thread(target=daily_token_report, daemon=True).start()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
