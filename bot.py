@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 # === Flask и Telegram Bot ===
 app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "Лёха жив, Лёха смотрит", 200
+
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # === OpenAI клиент по новой версии SDK ===
