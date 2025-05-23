@@ -6,6 +6,8 @@ import telebot
 from flask import Flask, request
 from openai import OpenAI
 
+import requests  # === JSONBIN MEMORY ===
+
 # === НАСТРОЙКИ ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -13,6 +15,10 @@ OWNER_ID = int(os.getenv("OWNER_ID"))
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://your-app-name.onrender.com
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+# === JSONBIN MEMORY ===
+JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY")  # X-Master-Key
+JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID")    # твой Bin ID, например "6830c5458a456b7966a48555"
 
 # === Логирование ===
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +35,39 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 # === OpenAI клиент по новой версии SDK ===
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# === JSONBIN MEMORY FUNCTIONS ===
+def save_memory(data: dict):
+    """Сохраняет весь словарь data в JSONBin."""
+    url = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Master-Key": JSONBIN_API_KEY
+    }
+    response = requests.put(url, json=data, headers=headers)
+    if response.status_code == 200:
+        logger.info("Память успешно сохранена в JSONBin")
+    else:
+        logger.error(f"Ошибка сохранения памяти: {response.status_code} {response.text}")
+
+def load_memory() -> dict:
+    """Загружает словарь из JSONBin, если ошибка — возвращает пустой словарь."""
+    url = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}/latest"
+    headers = {
+        "X-Master-Key": JSONBIN_API_KEY
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            # В JSONBin структура {"record": {...твои данные...}}
+            return data.get("record", {})
+        except Exception as e:
+            logger.error(f"Ошибка парсинга памяти из JSONBin: {e}")
+            return {}
+    else:
+        logger.error(f"Ошибка загрузки памяти: {response.status_code} {response.text}")
+        return {}
 
 # === SYSTEM PROMPT Лёхи ===
 LEHA_PROMPT = (
@@ -62,6 +101,10 @@ def handle_message(message):
     bot.send_chat_action(message.chat.id, 'typing')
     prompt = message.text.strip()
 
+    # Пример как использовать память — загружаем её, чтобы можно было добавить логику
+    memory = load_memory()  # Загружаем память
+    # тут можно добавить логику с памятью, например, добавлять данные в memory, сохранять обратно
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -73,6 +116,11 @@ def handle_message(message):
             max_tokens=1000
         )
         reply = response.choices[0].message.content.strip()
+
+        # Пример: можно сохранять что-то в память
+        # memory["last_user_message"] = prompt
+        # save_memory(memory)
+
         bot.reply_to(message, reply)
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
